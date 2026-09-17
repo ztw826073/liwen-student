@@ -158,7 +158,7 @@ def answer(question, context, hits, cfg):
     if not hits:
         return {"status": "insufficient", "claims": [],
                 "limitations": "没有找到足够相关资料，请换说法或补资料。"}
-    if cfg.get("MODE", "demo") == "demo":
+    if str(cfg.get("MODE", "demo")).strip().lower() != "api":
         return {"status": "ok", "claims": [
             {"text": c["text"], "refs": [c["id"]]} for c in hits[:2]
         ], "limitations": "离线教学模式：展示原文，不是大模型回答。"}
