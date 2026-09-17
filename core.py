@@ -4,6 +4,7 @@ import json
 import math
 import re
 import sqlite3
+import tomllib
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,6 +25,20 @@ _VAGUE_NOTES = {
 
 def now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def load_cfg(path=None):
+    # 直接读 secrets.toml，避免 Streamlit 转换后丢掉 MODE / API_KEY。
+    file = Path(path) if path else ROOT / ".streamlit" / "secrets.toml"
+    cfg = tomllib.loads(file.read_text(encoding="utf-8"))
+    for key in ("MODE", "API_KEY", "BASE_URL", "MODEL", "EMBED_MODEL"):
+        if key in cfg:
+            cfg[key] = str(cfg[key]).strip()
+    return cfg
+
+
+def use_api(cfg):
+    return str(cfg.get("MODE", "")).strip().lower() == "api"
 
 
 def qa_to_pages(qa):
@@ -103,8 +118,8 @@ def retrieve(question, chunks, k=4):
 
 
 def post_json(cfg, body):
-    key = cfg.get("API_KEY", "").strip()
-    base = cfg.get("BASE_URL", "").strip().rstrip("/")
+    key = str(cfg.get("API_KEY", "")).strip()
+    base = str(cfg.get("BASE_URL", "")).strip().rstrip("/")
     if not key or not base.startswith("https://"):
         raise ValueError("请配置 API_KEY 和 https 开头的 BASE_URL")
     request = Request(
@@ -158,7 +173,7 @@ def answer(question, context, hits, cfg):
     if not hits:
         return {"status": "insufficient", "claims": [],
                 "limitations": "没有找到足够相关资料，请换说法或补资料。"}
-    if str(cfg.get("MODE", "demo")).strip().lower() != "api":
+    if not use_api(cfg):
         return {"status": "ok", "claims": [
             {"text": c["text"], "refs": [c["id"]]} for c in hits[:2]
         ], "limitations": "离线教学模式：展示原文，不是大模型回答。"}
@@ -184,7 +199,8 @@ def answer(question, context, hits, cfg):
         "enable_thinking": False,
     }
     payload = post_json(cfg, body)
-    content = payload["choices"][0]["message"]["content"]
+    message = payload["choices"][0]["message"]
+    content = message.get("content") or message.get("reasoning_content") or ""
     result = validate_answer(json.loads(content), hits)
     result["usage"] = payload.get("usage", {})
     result["returned_model"] = payload.get("model", cfg["MODEL"])
