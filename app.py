@@ -237,15 +237,41 @@ elif page == "问题登记":
     if last:
         version = make_version(cfg)
         version["model"] = last.get("model") or version["model"]
+        result = last.get("result") or {}
         st.write("将使用最近一次问答快照：")
-        st.write("用户输入：" + last["question"])
+        st.markdown("**用户输入**")
+        st.write(last["question"] or "（空）")
         if last.get("context"):
             st.caption("补充条件：" + last["context"])
-        st.json({
-            "actual": last["result"],
-            "evidence": evidence_snapshot(last["hits"]),
-            "version": version,
-        })
+        st.markdown("**实际返回**")
+        st.write("状态：" + str(result.get("status") or "未知"))
+        if result.get("returned_model"):
+            st.caption("底座模型：" + str(result["returned_model"]))
+        claims = result.get("claims") or []
+        if not claims:
+            st.write(result.get("limitations") or "（无建议条文）")
+        else:
+            for i, claim in enumerate(claims, start=1):
+                st.write(f'{i}. {claim.get("text", "")}')
+                refs = claim.get("refs") or []
+                if refs:
+                    st.caption("引用：" + "、".join(str(r) for r in refs))
+                else:
+                    st.caption("本条无知识库引用")
+        if result.get("limitations"):
+            st.caption("适用说明：" + result["limitations"])
+        st.markdown("**证据快照**")
+        snaps = evidence_snapshot(last.get("hits") or [])
+        if not snaps:
+            st.write("本次没有检索到资料片段。")
+        else:
+            for hit in snaps:
+                show_evidence(hit)
+        st.markdown("**版本**")
+        st.caption(
+            f'程序 {version.get("app", "")}｜知识库 {version.get("kb", "")}'
+            f'｜模式 {version.get("mode", "")}｜模型 {version.get("model", "")}'
+        )
         with st.form("report_issue"):
             layer = st.radio(
                 "错误所在层",
@@ -279,17 +305,22 @@ elif page == "问题登记":
 
     issues = list_issues(owner)
     if issues:
-        table = [{
-            "时间": item["created"],
-            "层级": item["layer"],
-            "用户输入": item["record"]["question"],
-            "实际返回": json.dumps(
-                item["record"]["actual"], ensure_ascii=False)[:80],
-            "证据条数": len(item["record"].get("evidence") or []),
-            "版本": json.dumps(
-                item["record"].get("version") or {}, ensure_ascii=False),
-            "说明": item["record"]["note"],
-        } for item in issues]
+        table = []
+        for item in issues:
+            rec = item["record"]
+            actual = rec.get("actual") or {}
+            claims = actual.get("claims") or []
+            texts = "；".join(c.get("text", "") for c in claims if c.get("text"))
+            ver = rec.get("version") or {}
+            table.append({
+                "时间": item["created"],
+                "层级": item["layer"],
+                "用户输入": rec.get("question", ""),
+                "实际返回": texts or str(actual.get("limitations") or actual.get("status") or ""),
+                "证据条数": len(rec.get("evidence") or []),
+                "版本": f'{ver.get("app", "")} / {ver.get("mode", "")} / {ver.get("model", "")}',
+                "说明": rec.get("note", ""),
+            })
         st.dataframe(table, hide_index=True, width="stretch")
         st.download_button(
             "导出问题登记",
