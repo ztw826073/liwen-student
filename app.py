@@ -7,8 +7,8 @@ from auth import verify
 from vector_search import retrieve_vector
 from core import (
     answer, create_issue, create_task, evidence_snapshot, get_run,
-    init_db, list_issues, list_tasks, load_chunks, make_version,
-    retrieve, save_run, update_task,
+    init_db, list_issues, list_tasks, load_cfg, load_chunks, make_version,
+    retrieve, save_run, update_task, use_api,
 )
 st.set_page_config(page_title="栗问", layout="wide")
 # Streamlit 不提供项目根目录图片的网页地址，背景必须用 data URI。
@@ -78,10 +78,7 @@ st.title("栗问｜知识与农事任务助手")
 
 # secrets.toml 是服务端配置，不放到页面上，也不提交到仓库。
 try:
-    cfg = st.secrets.to_dict() if hasattr(st.secrets, "to_dict") else dict(st.secrets)
-    for key in ("MODE", "API_KEY", "BASE_URL", "MODEL", "EMBED_MODEL"):
-        if key in st.secrets:
-            cfg[key] = st.secrets[key]
+    cfg = load_cfg()
 except Exception:
     st.error("尚未配置 .streamlit/secrets.toml，请按指导书创建。")
     st.stop()
@@ -111,7 +108,7 @@ with st.sidebar:
         st.session_state.clear()
         st.rerun()
     page = st.radio("功能", ["知识问答", "我的任务", "问题登记", "资料目录"])
-    if str(cfg.get("MODE", "demo")).strip().lower() != "api":
+    if not use_api(cfg):
         st.warning("离线教学模式：不调用大模型。")
     else:
         st.caption("使用云端模型生成回答。")
@@ -159,7 +156,10 @@ if page == "知识问答":
             started = time.perf_counter()
             try:
                 with st.spinner("正在查询资料，请稍候……"):
-                    hits = retrieve_vector(question, chunks, cfg, k=4)
+                    try:
+                        hits = retrieve_vector(question, chunks, cfg, k=4)
+                    except Exception:
+                        hits = retrieve(question, chunks, 4)
                     result = answer(question, context, hits, cfg)
                     payload = {
                         "question": question, "context": context,
@@ -189,6 +189,8 @@ if page == "知识问答":
                 if st.button("将本条转成任务草稿", key=f"draft_{i}"):
                     st.session_state.draft_no = i
             st.caption(result["limitations"])
+            if result.get("returned_model"):
+                st.caption("已调用模型：" + str(result["returned_model"]))
         export = json.dumps(last, ensure_ascii=False, indent=2)
         st.download_button(
             "下载本次问答记录", export,
