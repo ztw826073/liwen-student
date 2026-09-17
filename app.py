@@ -78,7 +78,10 @@ st.title("栗问｜知识与农事任务助手")
 
 # secrets.toml 是服务端配置，不放到页面上，也不提交到仓库。
 try:
-    cfg = dict(st.secrets)
+    cfg = st.secrets.to_dict() if hasattr(st.secrets, "to_dict") else dict(st.secrets)
+    for key in ("MODE", "API_KEY", "BASE_URL", "MODEL", "EMBED_MODEL"):
+        if key in st.secrets:
+            cfg[key] = st.secrets[key]
 except Exception:
     st.error("尚未配置 .streamlit/secrets.toml，请按指导书创建。")
     st.stop()
@@ -108,7 +111,7 @@ with st.sidebar:
         st.session_state.clear()
         st.rerun()
     page = st.radio("功能", ["知识问答", "我的任务", "问题登记", "资料目录"])
-    if cfg.get("MODE", "demo") == "demo":
+    if str(cfg.get("MODE", "demo")).strip().lower() != "api":
         st.warning("离线教学模式：不调用大模型。")
     else:
         st.caption("使用云端模型生成回答。")
