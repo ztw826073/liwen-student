@@ -149,10 +149,10 @@ if page == "知识问答":
         st.session_state.pop("draft_no", None)
         if not question.strip():
             st.warning("请先输入问题。")
-        elif (any(w in question for w in ("贮藏", "保存", "储存"))
-              and not context.strip() and not general):
-            st.info("请补充销售时间目标和现有设施；未知可写未知。")
         else:
+            if (any(w in question for w in ("贮藏", "保存", "储存"))
+                    and not context.strip() and not general):
+                st.info("建议补充销售时间目标和现有设施；未知可写未知。本次仍继续查询。")
             started = time.perf_counter()
             try:
                 with st.spinner("正在查询资料，请稍候……"):
@@ -178,19 +178,25 @@ if page == "知识问答":
     if last:
         result = last["result"]
         st.subheader("回答与依据")
+        if result.get("returned_model"):
+            st.caption("已调用底座模型：" + str(result["returned_model"])
+                       + "；并结合本地知识库。")
         if result["status"] == "insufficient":
             st.info(result["limitations"])
         else:
             hit_map = {h["id"]: h for h in last["hits"]}
             for i, claim in enumerate(result["claims"]):
                 st.write(f'{i + 1}. {claim["text"]}')
-                for ref in dict.fromkeys(claim["refs"]):
-                    show_evidence(hit_map[ref])
+                refs = list(dict.fromkeys(claim.get("refs") or []))
+                if refs:
+                    for ref in refs:
+                        if ref in hit_map:
+                            show_evidence(hit_map[ref])
+                else:
+                    st.caption("本条为底座模型补充，不是知识库原文。")
                 if st.button("将本条转成任务草稿", key=f"draft_{i}"):
                     st.session_state.draft_no = i
             st.caption(result["limitations"])
-            if result.get("returned_model"):
-                st.caption("已调用模型：" + str(result["returned_model"]))
         export = json.dumps(last, ensure_ascii=False, indent=2)
         st.download_button(
             "下载本次问答记录", export,
