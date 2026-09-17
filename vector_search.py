@@ -74,7 +74,7 @@ def retrieve_vector(question, chunks, cfg, k=4):
         score = sum(a * b for a, b in zip(query, row["vector"]))
         ranked.append((score, mapping[row["id"]]))
     ranked.sort(key=lambda item: item[0], reverse=True)
-    # 分数仅用于排序，不代表回答正确率；无关证据由回答流程判别。
+    # 始终把知识库前k条交给底座模型；是否采用由提示词判断。
     return [dict(c, score=round(s, 4)) for s, c in ranked[:k]]
 
 
