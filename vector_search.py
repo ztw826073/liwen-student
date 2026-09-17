@@ -3,6 +3,7 @@ import hashlib
 import json
 import math
 import tomllib
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from core import DATA, ROOT, load_chunks
 
@@ -20,15 +21,26 @@ def fingerprint(chunks, cfg):
 
 
 def embedding(text, cfg):
-    body = {"model": cfg["EMBED_MODEL"], "input": [text],
-            "encoding_format": "float"}
+    key = str(cfg.get("API_KEY", "")).strip()
+    base = str(cfg.get("BASE_URL", "")).strip().rstrip("/")
+    model = str(cfg.get("EMBED_MODEL", "")).strip()
+    if not key or not base.startswith("https://") or not model:
+        raise ValueError("请配置 API_KEY、https 开头的 BASE_URL 和 EMBED_MODEL")
+    body = {"model": model, "input": [text], "encoding_format": "float"}
     request = Request(
-        cfg["BASE_URL"].rstrip("/") + "/embeddings",
+        base + "/embeddings",
         data=json.dumps(body).encode(),
-        headers={"Authorization": "Bearer " + cfg["API_KEY"],
-                 "Content-Type": "application/json"})
-    with urlopen(request, timeout=60) as response:
-        vector = json.load(response)["data"][0]["embedding"]
+        headers={"Authorization": "Bearer " + key,
+                 "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=60) as response:
+            vector = json.load(response)["data"][0]["embedding"]
+    except HTTPError as error:
+        raise RuntimeError(f"向量服务 HTTP {error.code}，见排错表")
+    except (URLError, TimeoutError):
+        raise RuntimeError("向量服务连接失败或超时")
     norm = math.sqrt(sum(float(v) ** 2 for v in vector))
     if not norm or not math.isfinite(norm):
         raise ValueError("向量为空或数值不合法")
