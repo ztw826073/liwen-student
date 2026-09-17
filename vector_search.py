@@ -20,7 +20,7 @@ def fingerprint(chunks, cfg):
 
 
 def embedding(text, cfg):
-    body = {"model": cfg["EMBED_MOADEL"], "input": [text],
+    body = {"model": cfg["EMBED_MODEL"], "input": [text],
             "encoding_format": "float"}
     request = Request(
         cfg["BASE_URL"].rstrip("/") + "/embeddings",
