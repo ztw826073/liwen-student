@@ -1,0 +1,28 @@
+[
+  {
+    "id": "D01",
+    "question": "评价板栗的糯性品质，可以参考哪些指标？",
+    "expected_docs": [
+      "DOC001"
+    ]
+  },
+  {
+    "id": "D02",
+    "question": "北方与南方板栗的淀粉特性有什么差别？",
+    "expected_docs": [
+      "DOC001"
+    ]
+  },
+  {
+    "id": "D03",
+    "question": "板栗淀粉颗粒的粒径范围是多少？",
+    "expected_docs": [
+      "DOC001"
+    ]
+  },
+  {
+    "id": "D04",
+    "question": "火星轨道怎样计算",
+    "expected_docs": []
+  }
+]
