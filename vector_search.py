@@ -2,6 +2,7 @@
 import hashlib
 import json
 import math
+import time
 import tomllib
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -34,13 +35,31 @@ def embedding(text, cfg):
                  "Content-Type": "application/json"},
         method="POST",
     )
-    try:
-        with urlopen(request, timeout=60) as response:
-            vector = json.load(response)["data"][0]["embedding"]
-    except HTTPError as error:
-        raise RuntimeError(f"向量服务 HTTP {error.code}，见排错表")
-    except (URLError, TimeoutError):
-        raise RuntimeError("向量服务连接失败或超时")
+    last_error = None
+    vector = None
+    for attempt in range(6):
+        try:
+            with urlopen(request, timeout=60) as response:
+                vector = json.load(response)["data"][0]["embedding"]
+            last_error = None
+            break
+        except HTTPError as error:
+            last_error = RuntimeError(f"向量服务 HTTP {error.code}，见排错表")
+            if error.code not in (429, 500, 502, 503):
+                raise last_error
+            time.sleep(min(30, 2 ** attempt))
+        except (URLError, TimeoutError):
+            last_error = RuntimeError("向量服务连接失败或超时")
+            time.sleep(min(30, 2 ** attempt))
+        request = Request(
+            base + "/embeddings",
+            data=json.dumps(body).encode(),
+            headers={"Authorization": "Bearer " + key,
+                     "Content-Type": "application/json"},
+            method="POST",
+        )
+    if last_error:
+        raise last_error
     norm = math.sqrt(sum(float(v) ** 2 for v in vector))
     if not norm or not math.isfinite(norm):
         raise ValueError("向量为空或数值不合法")

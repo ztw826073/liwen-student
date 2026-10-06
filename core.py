@@ -1,4 +1,5 @@
 """栗问核心：本地检索、模型调用、引用校验和任务保存。"""
+import base64
 import hashlib
 import json
 import math
@@ -31,9 +32,12 @@ def load_cfg(path=None):
     # 直接读 secrets.toml，避免 Streamlit 转换后丢掉 MODE / API_KEY。
     file = Path(path) if path else ROOT / ".streamlit" / "secrets.toml"
     cfg = tomllib.loads(file.read_text(encoding="utf-8-sig"))
-    for key in ("MODE", "API_KEY", "BASE_URL", "MODEL", "EMBED_MODEL"):
+    for key in ("MODE", "API_KEY", "BASE_URL", "MODEL", "EMBED_MODEL",
+                "VISION_MODEL"):
         if key in cfg:
             cfg[key] = str(cfg[key]).strip()
+    if not cfg.get("VISION_MODEL"):
+        cfg["VISION_MODEL"] = "qwen-vl-plus"
     return cfg
 
 
@@ -122,7 +126,7 @@ def retrieve(question, chunks, k=4):
     return [dict(c, score=round(s, 4)) for s, c in ranked[:k]]
 
 
-def post_json(cfg, body):
+def post_json(cfg, body, timeout=60):
     key = str(cfg.get("API_KEY", "")).strip()
     base = str(cfg.get("BASE_URL", "")).strip().rstrip("/")
     if not key or not base.startswith("https://"):
@@ -135,13 +139,61 @@ def post_json(cfg, body):
         method="POST",
     )
     try:
-        with urlopen(request, timeout=60) as response:
+        with urlopen(request, timeout=timeout) as response:
             return json.load(response)
     except HTTPError as error:
         # 不把请求头、密钥或服务商原始响应显示给用户。
         raise RuntimeError(f"模型服务 HTTP {error.code}，见排错表")
     except (URLError, TimeoutError):
         raise RuntimeError("模型连接失败或超时，请检查网络和地址")
+
+
+def recognize_image(cfg, image_bytes, mime="", hint=""):
+    if not use_api(cfg):
+        raise ValueError("离线教学模式不能识别图片，请使用 api 模式")
+    if not image_bytes:
+        raise ValueError("请先选择图片")
+    if len(image_bytes) > 5 * 1024 * 1024:
+        raise ValueError("图片请小于 5MB")
+    kind = (mime or "image/jpeg").split(";")[0].strip().lower()
+    if kind not in ("image/jpeg", "image/jpg", "image/png", "image/webp"):
+        raise ValueError("仅支持 jpg、png、webp 图片")
+    if kind == "image/jpg":
+        kind = "image/jpeg"
+    data_url = "data:" + kind + ";base64," + base64.b64encode(
+        image_bytes).decode("ascii")
+    ask = str(hint or "").strip() or (
+        "请识别这张图片。若与板栗、农事记录、病虫害、采收或贮藏有关，"
+        "请写出可见的关键信息，不要编造看不清的文字和数值。"
+    )
+    body = {
+        "model": cfg.get("VISION_MODEL") or "qwen-vl-plus",
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": data_url}},
+                {"type": "text", "text": ask},
+            ],
+        }],
+        "temperature": 0.2,
+        "max_tokens": 1200,
+    }
+    payload = post_json(cfg, body, timeout=90)
+    message = payload["choices"][0]["message"]
+    content = (message.get("content") or message.get("reasoning_content")
+               or "")
+    if isinstance(content, list):
+        content = "".join(
+            part.get("text", "") if isinstance(part, dict) else str(part)
+            for part in content)
+    text = str(content).strip()
+    if not text:
+        raise ValueError("图片识别没有返回文字")
+    return {
+        "text": text[:3000],
+        "returned_model": payload.get("model", cfg.get("VISION_MODEL")),
+        "usage": payload.get("usage", {}),
+    }
 
 
 def validate_answer(result, hits):
