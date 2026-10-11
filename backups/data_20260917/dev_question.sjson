@@ -1,0 +1,28 @@
+[
+  {
+    "id": "D01",
+    "question": "板栗批次记录需要填写哪些信息",
+    "expected_docs": [
+      "DEMO001"
+    ]
+  },
+  {
+    "id": "D02",
+    "question": "板栗出库核对需要哪些字段",
+    "expected_docs": [
+      "DEMO002"
+    ]
+  },
+  {
+    "id": "D03",
+    "question": "贮藏条件追问要询问什么",
+    "expected_docs": [
+      "DEMO003"
+    ]
+  },
+  {
+    "id": "D04",
+    "question": "火星轨道怎样计算",
+    "expected_docs": []
+  }
+]
