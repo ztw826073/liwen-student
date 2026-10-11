@@ -3,8 +3,11 @@ import base64
 import hashlib
 import json
 import math
+import os
 import re
 import sqlite3
+import subprocess
+import tempfile
 import tomllib
 import uuid
 from datetime import datetime, timezone
@@ -15,6 +18,7 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data"
 KB = DATA / "knowledge.json"
+SOURCES = ROOT / "private_pdfs"
 DB = DATA / "liwen.db"
 APP_VERSION = "liwen-1"
 ISSUE_LAYERS = ("资料", "检索", "提示词", "页面")
@@ -62,7 +66,10 @@ def qa_to_pages(qa):
             "出处：" + source_pages,
         ]).strip()
         if text:
-            rows.append({"page": page, "text": text})
+            item_page = {"page": page, "text": text}
+            if item.get("excel"):
+                item_page["excel"] = item["excel"]
+            rows.append(item_page)
     return rows
 
 
@@ -103,6 +110,124 @@ def load_chunks(path=KB):
                     "scope": doc.get("scope", "适用条件待核对"),
                 })
     return chunks
+
+
+_docs_cache = {}
+
+
+def load_docs(path=KB):
+    file = Path(path)
+    stamp = file.stat().st_mtime
+    cached = _docs_cache.get(str(file))
+    if cached and cached[0] == stamp:
+        return cached[1]
+    docs = json.loads(file.read_text(encoding="utf-8-sig"))
+    _docs_cache[str(file)] = (stamp, docs)
+    return docs
+
+
+def source_workbook(name):
+    if not name:
+        return None
+    file = Path(str(name).split("｜", 1)[0].strip()).name
+    path = (SOURCES / file).resolve()
+    if path.is_file() and path.suffix.lower() in {".xlsx", ".xlsm"}:
+        return path
+    return None
+
+
+def excel_caption(loc):
+    if not loc:
+        return ""
+    parts = [loc.get("file") or "", "工作表「" + str(loc.get("sheet") or "") + "」"]
+    if loc.get("row"):
+        parts.append("第" + str(loc["row"]) + "行")
+    extra = []
+    if loc.get("seq"):
+        extra.append("序号 " + str(loc["seq"]))
+    if loc.get("item"):
+        extra.append("条目序号 " + str(loc["item"]))
+    text = " · ".join(p for p in parts if p)
+    if extra:
+        text += "（" + "，".join(extra) + "）"
+    return text
+
+
+def excel_for_hit(hit, docs=None):
+    if hit.get("excel"):
+        return hit["excel"]
+    docs = docs if docs is not None else load_docs()
+    by_id = {doc["id"]: doc for doc in docs}
+    doc = by_id.get(hit.get("doc_id"))
+    if not doc:
+        return None
+    text = str(hit.get("text") or "")
+    needle = text[:80]
+    pages = doc.get("pages") or []
+    matched = None
+    for page in pages:
+        loc = page.get("excel")
+        if not loc:
+            continue
+        body = str(page.get("text") or "")
+        same_page = page.get("page") == hit.get("page")
+        same_text = bool(needle) and (needle in body or body[:80] in text)
+        if same_page and same_text:
+            return loc
+        if same_text:
+            matched = loc
+        elif same_page and matched is None:
+            matched = loc
+    if matched:
+        return matched
+    if doc.get("excel"):
+        return doc["excel"]
+    path = source_workbook(doc.get("source"))
+    if path:
+        return {"file": path.name, "sheet": "", "row": 1}
+    return None
+
+
+def open_excel(loc):
+    path = source_workbook((loc or {}).get("file"))
+    if path is None:
+        raise FileNotFoundError("找不到对应的 Excel 文件")
+    sheet = str(loc.get("sheet") or "")
+    row = int(loc.get("row") or 1)
+    script = Path(tempfile.gettempdir()) / "liwen_open_excel.ps1"
+    script.write_text(
+        "param($Path, $Sheet, $Row)\n"
+        "try {\n"
+        "  $excel = [Runtime.InteropServices.Marshal]::GetActiveObject("
+        "'Excel.Application')\n"
+        "} catch {\n"
+        "  $excel = New-Object -ComObject Excel.Application\n"
+        "}\n"
+        "$excel.Visible = $true\n"
+        "$wb = $null\n"
+        "foreach ($item in @($excel.Workbooks)) {\n"
+        "  if ($item.FullName -eq $Path) { $wb = $item; break }\n"
+        "}\n"
+        "if (-not $wb) { $wb = $excel.Workbooks.Open($Path) }\n"
+        "if ($Sheet) {\n"
+        "  $ws = $wb.Worksheets.Item($Sheet)\n"
+        "  $ws.Activate()\n"
+        "  $last = [Math]::Max(1, [int]$ws.UsedRange.Columns.Count)\n"
+        "  $range = $ws.Range($ws.Cells.Item($Row, 1), "
+        "$ws.Cells.Item($Row, $last))\n"
+        "  $range.Select()\n"
+        "  $excel.ActiveWindow.ScrollRow = [Math]::Max(1, $Row - 3)\n"
+        "  $excel.ActiveWindow.ScrollColumn = 1\n"
+        "}\n",
+        encoding="utf-8-sig",
+    )
+    started = subprocess.run(
+        ["powershell", "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass",
+         "-File", str(script), str(path), sheet, str(row)],
+        capture_output=True, text=True, timeout=40,
+    )
+    if started.returncode != 0:
+        os.startfile(str(path))
 
 
 def grams(text):

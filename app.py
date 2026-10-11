@@ -1,15 +1,15 @@
 import html
 import json
 import time
-from pathlib import Path
 
 import streamlit as st
 
 from auth import verify
 from core import (
-    answer, create_issue, create_task, evidence_snapshot, get_run,
-    init_db, list_issues, list_tasks, load_cfg, load_chunks, make_version,
-    recognize_image, retrieve, save_run, update_task, use_api,
+    answer, create_issue, create_task, evidence_snapshot, excel_caption,
+    excel_for_hit, get_run, init_db, list_issues, list_tasks, load_cfg,
+    load_chunks, make_version, open_excel, recognize_image, retrieve,
+    save_run, source_workbook, update_task, use_api,
 )
 from vector_search import retrieve_vector
 
@@ -224,14 +224,44 @@ button[kind="primary"]:hover, button[data-testid="stBaseButton-primary"]:hover {
 """, unsafe_allow_html=True)
 
 
+def excel_buttons(hit, key):
+    loc = excel_for_hit(hit)
+    if not loc:
+        return
+    st.caption("对应点：" + excel_caption(loc))
+    path = source_workbook(loc.get("file"))
+    cols = st.columns(2)
+    with cols[0]:
+        if st.button("在本机打开对应行", key=key + "-open"):
+            try:
+                open_excel(loc)
+                st.success("已打开 Excel，并选中对应行。")
+            except Exception as error:
+                st.error("未能打开 Excel：" + str(error)[:160])
+    with cols[1]:
+        if path is not None:
+            st.download_button(
+                "下载该 Excel",
+                data=path.read_bytes(),
+                file_name=path.name,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key=key + "-dl",
+            )
+
+
 def show_evidence(hit):
-    label = f'{hit["title"]}｜PDF页序 {hit["page"]}'
+    loc = excel_for_hit(hit)
+    if loc:
+        label = f'{hit["title"]}｜{loc.get("sheet") or "Excel"} 第{loc.get("row")}行'
+    else:
+        label = f'{hit["title"]}｜PDF页序 {hit["page"]}'
     with st.expander(label):
         st.caption("来源：" + str(hit.get("source") or ""))
         if hit.get("scope"):
             st.caption("适用条件：" + hit["scope"])
         st.text(hit.get("text") or "")
         st.caption("片段编号：" + str(hit.get("id") or ""))
+        excel_buttons(hit, "ev-" + str(hit.get("id") or label))
 
 
 def run_question(question, context, general, owner, chunks, cfg, image=None):
@@ -313,13 +343,18 @@ def render_sources(payload):
         pages = "、".join(cited.get(hit.get("id"), []))
         tag = f"建议 {pages}" if pages else "本次检索，回答未直接引用"
         st.markdown(f"**{n}. {hit.get('title') or '资料'}**")
-        st.caption(f"PDF页序 {hit.get('page')} · {tag}")
+        loc = excel_for_hit(hit)
+        if loc:
+            st.caption(f"{excel_caption(loc)} · {tag}")
+        else:
+            st.caption(f"PDF页序 {hit.get('page')} · {tag}")
         if hit.get("source"):
             st.caption("来源：" + str(hit["source"]))
         if hit.get("scope"):
             st.caption("适用条件：" + str(hit["scope"]))
         st.text(hit.get("text") or "")
         st.caption("片段编号：" + str(hit.get("id") or ""))
+        excel_buttons(hit, f"src-{n}-{hit.get('id') or n}")
         st.divider()
 
 
@@ -607,12 +642,28 @@ def page_tasks(owner):
 def page_docs(chunks):
     st.markdown("## 资料目录")
     shown = set()
+    books = []
+    seen_files = set()
     for chunk in chunks:
+        loc = excel_for_hit(chunk)
+        file = (loc or {}).get("file")
+        if file and file not in seen_files:
+            seen_files.add(file)
+            books.append(file)
         if chunk["doc_id"] not in shown:
             shown.add(chunk["doc_id"])
             st.write(chunk["title"])
             st.caption(chunk["source"])
     st.write(f"已审核资料 {len(shown)} 份；检索片段 {len(chunks)} 条。")
+    if books:
+        st.markdown("#### 源 Excel")
+        st.caption("问答命中后可跳到对应行；这里先打开整本表。")
+        for name in books:
+            path = source_workbook(name)
+            if path is None:
+                continue
+            excel_buttons({"excel": {"file": path.name, "sheet": "", "row": 1}},
+                          "book-" + path.stem)
     st.caption("新增、审核和停用由教师在源资料文件中完成。")
 
 
