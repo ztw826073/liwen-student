@@ -1,15 +1,16 @@
 import html
 import json
 import time
+from pathlib import Path
 
 import streamlit as st
 
 from auth import verify
 from core import (
-    answer, create_issue, create_task, evidence_snapshot, excel_caption,
-    excel_for_hit, get_run, init_db, list_issues, list_tasks, load_cfg,
-    load_chunks, make_version, open_excel, recognize_image, retrieve,
-    save_run, source_workbook, update_task, use_api,
+    answer, can_open_excel_locally, create_issue, create_task,
+    evidence_snapshot, excel_caption, excel_for_hit, get_run, init_db,
+    list_issues, list_tasks, load_cfg, load_chunks, make_version, open_excel,
+    recognize_image, retrieve, save_run, source_workbook, update_task, use_api,
 )
 from vector_search import retrieve_vector
 
@@ -230,16 +231,19 @@ def excel_buttons(hit, key):
         return
     st.caption("对应点：" + excel_caption(loc))
     path = source_workbook(loc.get("file"))
-    cols = st.columns(2)
-    with cols[0]:
-        if st.button("在本机打开对应行", key=key + "-open"):
-            try:
-                open_excel(loc)
-                st.success("已打开 Excel，并选中对应行。")
-            except Exception as error:
-                st.error("未能打开 Excel：" + str(error)[:160])
-    with cols[1]:
-        if path is not None:
+    if path is None:
+        st.caption("源表未随网站一起发布，无法下载。请把 data/excel 里的 xlsx 一并上传到 GitHub。")
+        return
+    if can_open_excel_locally():
+        cols = st.columns(2)
+        with cols[0]:
+            if st.button("在本机打开对应行", key=key + "-open"):
+                try:
+                    open_excel(loc)
+                    st.success("已打开 Excel，并选中对应行。")
+                except Exception as error:
+                    st.error("未能打开 Excel：" + str(error)[:160])
+        with cols[1]:
             st.download_button(
                 "下载该 Excel",
                 data=path.read_bytes(),
@@ -247,6 +251,15 @@ def excel_buttons(hit, key):
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key=key + "-dl",
             )
+    else:
+        st.caption("网页端请下载后在本机 Excel 中打开，并按上面的工作表和行号查看。")
+        st.download_button(
+            "下载该 Excel",
+            data=path.read_bytes(),
+            file_name=path.name,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=key + "-dl",
+        )
 
 
 def show_evidence(hit):
@@ -659,11 +672,8 @@ def page_docs(chunks):
         st.markdown("#### 源 Excel")
         st.caption("问答命中后可跳到对应行；这里先打开整本表。")
         for name in books:
-            path = source_workbook(name)
-            if path is None:
-                continue
-            excel_buttons({"excel": {"file": path.name, "sheet": "", "row": 1}},
-                          "book-" + path.stem)
+            excel_buttons({"excel": {"file": name, "sheet": "", "row": 1}},
+                          "book-" + Path(name).stem)
     st.caption("新增、审核和停用由教师在源资料文件中完成。")
 
 
