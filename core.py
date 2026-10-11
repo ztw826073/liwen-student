@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data"
 KB = DATA / "knowledge.json"
 SOURCES = ROOT / "private_pdfs"
+SOURCE_DIRS = (DATA / "excel", SOURCES, DATA, ROOT)
 DB = DATA / "liwen.db"
 APP_VERSION = "liwen-1"
 ISSUE_LAYERS = ("资料", "检索", "提示词", "页面")
@@ -130,10 +131,23 @@ def source_workbook(name):
     if not name:
         return None
     file = Path(str(name).split("｜", 1)[0].strip()).name
-    path = (SOURCES / file).resolve()
-    if path.is_file() and path.suffix.lower() in {".xlsx", ".xlsm"}:
-        return path
+    if Path(file).suffix.lower() not in {".xlsx", ".xlsm"}:
+        return None
+    for folder in SOURCE_DIRS:
+        path = (folder / file).resolve()
+        if path.is_file():
+            return path
     return None
+
+
+def can_open_excel_locally():
+    if os.name != "nt":
+        return False
+    if os.environ.get("STREAMLIT_CLOUD") or os.environ.get("STREAMLIT_SHARING_MODE"):
+        return False
+    if Path("/mount/src").exists():
+        return False
+    return True
 
 
 def excel_caption(loc):
